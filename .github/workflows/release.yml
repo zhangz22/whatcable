@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build and release
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.3.app
+
+      - name: Lower deployment target to macOS 13
+        run: sed -i '' 's/\.macOS(\.v14)/\.macOS(\.v13)/' Package.swift
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build universal binaries
+        run: |
+          swift build -c release --product WhatCable --arch arm64 --arch x86_64
+          swift build -c release --product whatcable-cli --arch arm64 --arch x86_64
+
+      - name: Assemble .app bundle
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          APP_NAME="WhatCable"
+          BUNDLE_ID="uk.whatcable.whatcable"
+          # Strip leading 'v' from tag (v0.10.12 -> 0.10.12)
+          APP_VERSION="${VERSION#v}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          MIN_OS="13.0"
+          CLI_PRODUCT="whatcable-cli"
+          CLI_BIN_NAME="whatcable"
+
+          DIST_DIR="dist"
+          APP_DIR="${DIST_DIR}/${APP_NAME}.app"
+          CONTENTS_DIR="${APP_DIR}/Contents"
+          MACOS_DIR="${CONTENTS_DIR}/MacOS"
+          HELPERS_DIR="${CONTENTS_DIR}/Helpers"
+          RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+
+          mkdir -p "${MACOS_DIR}" "${HELPERS_DIR}" "${RESOURCES_DIR}"
+
+          BIN_PATH=$(swift build -c release --product "${APP_NAME}" \
+              --arch arm64 --arch x86_64 --show-bin-path)
+          cp "${BIN_PATH}/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
+          cp "${BIN_PATH}/${CLI_PRODUCT}" "${HELPERS_DIR}/${CLI_BIN_NAME}"
+
+          # Copy SPM resource bundles
+          if [[ -d "Sources/WhatCableCore/Resources" ]]; then
+            SPM_BUNDLE="${RESOURCES_DIR}/WhatCable_WhatCableCore.bundle"
+            mkdir -p "${SPM_BUNDLE}"
+            cp -R "Sources/WhatCableCore/Resources/." "${SPM_BUNDLE}/"
+          fi
+          if [[ -d "Sources/WhatCable/Resources" ]]; then
+            APP_BUNDLE="${RESOURCES_DIR}/WhatCable_WhatCable.bundle"
+            mkdir -p "${APP_BUNDLE}"
+            cp -R "Sources/WhatCable/Resources/." "${APP_BUNDLE}/"
+          fi
+
+          cp "scripts/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+
+          cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleLocalizations</key>
+              <array>
+                  <string>en</string>
+                  <string>hy</string>
+                  <string>it</string>
+                  <string>pl</string>
+                  <string>zh-Hans</string>
+              </array>
+              <key>CFBundleExecutable</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundleIdentifier</key>
+              <string>${BUNDLE_ID}</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleDisplayName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${APP_VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${BUILD_NUMBER}</string>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.utilities</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>${MIN_OS}</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHumanReadableCopyright</key>
+              <string>© $(date +%Y) Darryl Morley</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          printf "APPL????" > "${CONTENTS_DIR}/PkgInfo"
+
+      - name: Sign ad-hoc
+        run: |
+          codesign --force --sign - \
+            dist/WhatCable.app/Contents/Helpers/whatcable
+          codesign --force \
+            --entitlements scripts/WhatCable.entitlements \
+            --sign - dist/WhatCable.app
+
+      - name: Verify and zip
+        run: |
+          codesign --verify --deep --strict dist/WhatCable.app
+          lipo -archs dist/WhatCable.app/Contents/MacOS/WhatCable
+          lipo -archs dist/WhatCable.app/Contents/Helpers/whatcable
+          cd dist && ditto -c -k --keepParent WhatCable.app WhatCable.zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WhatCable.zip
+          generate_release_notes: true
