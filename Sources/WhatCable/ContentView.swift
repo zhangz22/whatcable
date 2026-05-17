@@ -120,7 +120,7 @@ struct ContentView: View {
             usb3Watcher.stop()
             trmWatcher.stop()
         }
-        .onChange(of: refresh.tick) { _, _ in
+        .onChange(of: refresh.tick) { _ in
             portWatcher.refresh()
             powerWatcher.refresh()
             pdWatcher.refresh()
@@ -134,9 +134,9 @@ struct ContentView: View {
         // source add/remove, PD identity add/remove) changes. Debounced so a
         // single plug event, which can fire all three within a few ms,
         // produces one refresh, with a backoff to catch slow controllers.
-        .onChange(of: deviceWatcher.devices) { _, _ in scheduleLivePortRefresh() }
-        .onChange(of: powerWatcher.sources) { _, _ in scheduleLivePortRefresh() }
-        .onChange(of: pdWatcher.identities) { _, _ in scheduleLivePortRefresh() }
+        .onChange(of: deviceWatcher.devices) { _ in scheduleLivePortRefresh() }
+        .onChange(of: powerWatcher.sources) { _ in scheduleLivePortRefresh() }
+        .onChange(of: pdWatcher.identities) { _ in scheduleLivePortRefresh() }
     }
 
     private func scheduleLivePortRefresh() {
