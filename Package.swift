@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "WhatCable",
     defaultLocalization: "en",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .executable(name: "WhatCable", targets: ["WhatCable"]),
         .executable(name: "whatcable-cli", targets: ["WhatCableCLI"]),
